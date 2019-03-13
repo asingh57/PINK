@@ -1,0 +1,170 @@
+- hosts: 127.0.0.1
+  connection: local
+  tasks:
+  - include_vars:
+        file: ../db_vars.json
+        name: db_vars
+  - name: generate self signed ca-key
+    shell: openssl genrsa 2048 > ca-key.pem
+  - name: generate ca cert
+    shell: openssl req -new -x509 -nodes -days 365000 -key ca-key.pem -out "{{ db_vars.mariadb.ssl_ca_src }}" -subj "{{ db_vars.mariadb.ssl_ca_details }}"
+  - name: generate request and key files for cert
+    shell: openssl req -newkey rsa:2048 -days 365000 -nodes -keyout "{{ db_vars.mariadb.ssl_key_src }}" -out server-req.pem -subj "{{ db_vars.mariadb.ssl_cert_details }}"
+  - name: generate cert
+    shell: openssl x509 -req -in server-req.pem -days 365000 -CA "{{ db_vars.mariadb.ssl_ca_src }}" -CAkey ca-key.pem -set_serial 01 -out "{{ db_vars.mariadb.ssl_cert_src }}"
+  - name: clean up
+    shell: rm ca-key.pem server-req.pem
+  - name: verify cert validity
+    shell: openssl verify -CAfile "{{ db_vars.mariadb.ssl_ca_src }}" "{{ db_vars.mariadb.ssl_cert_src }}" 
+    
+  
+- hosts: dbserver
+  tasks:
+    - include_vars:
+        file: ../db_vars.json
+        name: db_vars
+
+    - name: Install apt utils
+      apt:
+        name: apt-utils
+        state: latest
+
+    - name: Install mariadb
+      apt: 
+        name: mariadb-server
+        state: latest
+        update_cache: yes
+
+
+    - name: Install pip
+      apt: 
+        name: python-pip
+        state: latest
+        update_cache: yes
+
+    - name: Install mysqllib
+      apt: 
+        name: libmysqlclient-dev
+        state: latest
+        update_cache: yes
+
+    - name: Install Mysql-python
+      pip: 
+        name: MYSQL-python
+
+    - name: Create Folder for schema
+      file: 
+       path: "{{ db_vars.mariadb.mariadb_schema_dest }}"
+       recurse: yes
+       state: directory
+
+    - name: copy schema file
+      copy:
+        src: "{{ db_vars.mariadb.mariadb_schema_src }}"
+        dest: "{{ db_vars.mariadb.mariadb_schema_dest }}/{{ db_vars.mariadb.mariadb_schema_dest_file }}"
+        owner: root
+        mode: 0600
+
+
+    - name: Create Folder ssl ca dest
+      file: 
+       path: "{{ db_vars.mariadb.ssl_ca_dest }}"
+       recurse: yes
+       state: directory
+
+    - name: Create Folder ssl key dest
+      file: 
+       path: "{{ db_vars.mariadb.ssl_key_dest }}"
+       recurse: yes
+       state: directory
+       
+    - name: copy ca ssl for server
+      copy:
+        src: "{{ db_vars.mariadb.ssl_ca_src }}"
+        dest: "{{ db_vars.mariadb.ssl_ca_dest }}/{{ db_vars.mariadb.ssl_ca_dest_filename }}"
+        owner: mysql
+        group: mysql
+        mode: 0660
+
+
+
+    - name: copy key ssl file for server
+      copy:
+        src: "{{ db_vars.mariadb.ssl_key_src }}"
+        dest: "{{ db_vars.mariadb.ssl_key_dest }}/{{ db_vars.mariadb.ssl_key_dest_filename }}"
+        owner: mysql
+        group: mysql
+        mode: 0660
+
+
+    - name: Create Folder ssl cert dest
+      file: 
+       path: "{{ db_vars.mariadb.ssl_cert_dest }}"
+       recurse: yes
+       state: directory
+     
+    - name: copy cert file for server
+      copy:
+        src: "{{ db_vars.mariadb.ssl_cert_src }}"
+        dest: "{{ db_vars.mariadb.ssl_cert_dest }}/{{ db_vars.mariadb.ssl_cert_dest_filename }}"
+        owner: mysql
+        group: mysql
+        mode: 0664
+
+
+    - name: start sql service and enable the service
+      service:
+        name: mysql
+        state: started
+        enabled: true
+
+
+    - name: Set/change root password
+      mysql_user:
+        name: "{{ db_vars.mariadb.root_username }}"
+        password: "{{ db_vars.mariadb.root_new_password }}"
+        check_implicit_admin: yes
+        state: present
+        login_user: "{{ db_vars.mariadb.root_username }}"
+        login_password: "{{ db_vars.mariadb.root_old_password }}"
+        priv: "*.*:ALL,GRANT"
+        host_all: yes
+            
+
+
+    - name: Import pinkdb schema
+      mysql_db:
+        state: import
+        name: all
+        target: "{{ db_vars.mariadb.mariadb_schema_dest }}/{{ db_vars.mariadb.mariadb_schema_dest_file }}"
+        login_user: "{{ db_vars.mariadb.root_username }}"
+        login_password: "{{ db_vars.mariadb.root_new_password }}"
+
+
+
+    - name: Create user and grant web app access to pink DB
+      mysql_user:
+        name: "{{ db_vars.mariadb.web_app_user }}"
+        password: "{{ db_vars.mariadb.web_app_password }}"
+        priv: '{{ db_vars.mariadb.db_name }}.preferences:SELECT,INSERT'
+        state: present
+        login_user: "{{ db_vars.mariadb.root_username }}"
+        login_password: "{{ db_vars.mariadb.root_new_password }}"
+        host: "{{ db_vars.mariadb.web_app_host }}"
+
+    - name: force ssl use for web app user
+      mysql_user:
+        name: "{{ db_vars.mariadb.web_app_user }}"
+        password: "{{ db_vars.mariadb.web_app_password }}"
+        append_privs: true
+        priv: '*.*:REQUIRESSL'
+        state: present
+        login_user: "{{ db_vars.mariadb.root_username }}"
+        login_password: "{{ db_vars.mariadb.root_new_password }}"
+        host_all: yes
+
+     
+    - name: start sql service and enable the service
+      service:
+        name: mysql
+        state: restarted
