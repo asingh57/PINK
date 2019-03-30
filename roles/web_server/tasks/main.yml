@@ -1,0 +1,49 @@
+---
+# tasks file for web_server
+
+- name: Install npm
+  apt: 
+    name: npm
+    update_cache: yes
+
+- name: Install nodejs
+  apt: 
+    name: nodejs
+    
+
+   
+- name: Copy web app to web server
+  synchronize:
+      src: web_app
+      dest: /
+      
+- name: Install package.json dependencies
+  npm:
+    path: /web_app
+  
+- name: Install pm2
+  npm:
+    name: pm2
+    global: yes
+    state: present
+    
+ 
+    
+- name: Stop old server if it exists
+  command: pm2 delete pink_web_app
+  ignore_errors: yes
+
+
+- name: create directory for ssh key
+  file:
+    path: ~/.ssh
+    state: directory
+    
+
+  
+
+
+    
+  
+    
+

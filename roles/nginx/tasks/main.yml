@@ -1,0 +1,25 @@
+---
+# tasks file for nginx
+
+- name: Install nginx
+  apt: 
+    name: nginx
+    state: installed
+  
+
+  
+- name: upload nginx config
+  template:
+    src: nginx.j2
+    dest: /etc/nginx/nginx.conf
+  
+    
+- name: start nginx
+  systemd:
+    name: nginx
+    state: started
+    
+- name: reload nginx
+  systemd:
+    name: nginx
+    state: reloaded

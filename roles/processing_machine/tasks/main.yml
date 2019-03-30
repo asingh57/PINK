@@ -1,0 +1,72 @@
+---
+# tasks file for processing_machine
+ 
+- name: install gcc
+  apt: 
+    name: gcc
+    update_cache: yes
+    
+- name: remove old docker
+  apt: 
+    name: ['docker','docker-ceS','nvidia-docker2']
+    state: absent
+
+    
+    
+- name: add docker gpg key
+  raw: |
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+- name: cache update
+  apt:
+    update_cache: yes   
+    
+     
+
+- name: install docker bionic
+  apt:
+    name: docker-ce=5:18.09.4~3-0~ubuntu-bionic
+    update_cache: yes
+    force: yes
+    
+    
+- name: install CUDA dependencies
+  apt: 
+    name: ['freeglut3','freeglut3-dev','libxi-dev','libxmu-dev','curl','apt-transport-https','ca-certificates','software-properties-common']
+    state: present
+
+       
+ 
+- name: Add key for Nvidia CUDA deb
+  raw: sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1810/x86_64/7fa2af80.pub
+  
+ 
+- name: unpack deb
+  raw: sudo dpkg -i /cuda-repo-ubuntu1810_10.1.105-1_amd64.deb
+  
+- name: Update apt packages
+  apt:
+    update_cache: yes
+    
+- name: Install cuda
+  apt:
+    name: cuda
+    
+- name: add gpg keys for nvidia-docker2
+  raw: |
+    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+    curl -s -L https://nvidia.github.io/nvidia-docker/ubuntu18.04/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+    
+    
+- name: Update apt packages
+  apt:
+    update_cache: yes
+    
+- name: install nvidia docker 2
+  apt:
+    name: nvidia-docker2
+    update_cache: yes
+    
+- name: restart nvidia daemon
+  raw: pkill -SIGHUP dockerd
+  

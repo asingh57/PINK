@@ -1,54 +1,44 @@
 # PINK
 PINK is not Kubernetes
 
-A simple cloud orchestration tool that allows GUI based access to a cluster of CUDA powered servers. Users can simply upload their docker containers and have their allocated servers process them.
+A simple, fault tolerant cloud orchestration tool that allows GUI/CLI based access to a cluster of CUDA powered servers. Users can simply upload their docker images and have allocated servers load-balance and process them.
 
-This project requires the following:
+The following configuration is recommended for this project, although some of the functions can be aggregated together:
 
-1) A control machine with Ansible and NodeJS installed. This will contain the Web GUI and will manage our other servers
+1) One administrator machine with Ansible 2.8 installed. "Control server"
+2) At least one machine with aptitude package manager "Web server(s)", 
+    control server has ssh access to these machines
+3) At least one server with aptitude package manager and a Nvidia CUDA capable GPU "Processing server(s)" 
+    control server has ssh access to these machines.
+4) A linux router connected to all of the above with opkg installed. (In my case, a dd-wrt router) "Web Load Balancer" 
+    control server has ssh access to this router
+5) A linux server with aptitude package manager "Database server"
+    control server has ssh access to this machine
 
-2) A server running debian (could be the same as control machine) to be used as DB server. SSH access to this machine must be provided to the control machine.
+## How it works:
+A task is uploaded by the user on the web app or CLI. Here "task" means a docker image
+The task is handled by the web server and allocated to one of the processing servers
+The processing server processes the task as a container and returns the docker container's file system as a downloadable output to the user
 
-OR 
+###On the back end:
+The router allocates work to individual web servers via nginx
+An etcd key store cluster is formed using all machines on the network
+The web servers store active transaction details in etcd
+web servers make entries about past transactions in the db (essentially a logging system)
+The containers are uploaded via SCP into the processing servers
+The processing servers run docker containers and update their status on etcd.
+Once completed, processing servers return the compressed file system of the docker.
 
-A server already running Mariadb (in which case, please read the note at step 1
 
-3) Atleast one debian machine that will act as a processing server with at least one dedicated Nvidia GPU each. Control machine must be provided ssh access to each of these machines.
 
 
 ## Step 1)
-**Note:** Skip this step if you want to use an existing DB server. Instead, simply run the schema directly on the mariadb and add the web app user to the db manually. Also, update the user, password, db ssl certs and location of db server directly 
+Add SSL keys for web app under ssl folder of web app
+Add SSL keys for db ssl_db folder. You can create your own by following the following
+https://mariadb.com/kb/en/library/certificate-creation-with-openssl/
 
-
-Clone this repo onto the control machine and open the db_server_config folder.
-Here, you must update the "servers" file to enter the location, user, ssh port of your database server.
-Update db_vars.json to add ssl keys for web and db servers, username and password to be used by the web app
-
-**Note:** It is strongly recommended that you encrypt db_vars.json since it contains passwords using **ansible-vault encrypt**
-
-Once done, simply run the following to install MariaDB at the specified location
-
-ansible-playbook main.yml -i hosts --ask-vault-pass
-
+**Note:** 
+**Note:** 
 ## Step 2)
-The password for the nodeapp user should be specified as an environment variable before execution
-To run the web server simply do
-
-```
-DB_PASSWORD='passwordfromdbvarsfile' node index.js
-```
-
-
-On the GUI, when a machine is added, a default configuration will be stored in the database
-
-By default SIGINT (ctrl + c) will be sent to client's program 20 minutes before their lease expires. 
-kill -SIGINT `pgrep PROGRAMNAME`
-
-
-
-https://docs.docker.com/config/containers/resource_constraints/
-
-
-
 
 

@@ -1,0 +1,35 @@
+load_module /usr/lib/nginx/modules/ngx_stream_module.so;
+
+events {
+  worker_connections  4096; 
+}
+
+stream {
+  upstream pink_app {
+    {% for host in groups['web_server'] %}
+      server {{ hostvars[host]['ansible_default_ipv4']['address'] }}:443;
+    {% endfor %}
+  }
+  server {
+        listen 443;
+        proxy_pass pink_app;
+    }
+
+  upstream processing {
+    {% for host in groups['processing_machine'] %}
+      server {{ hostvars[host]['ansible_default_ipv4']['address'] }}:22;
+    {% endfor %}
+  }
+
+
+
+  server {
+        listen 5050;
+        proxy_pass processing;
+    }
+    
+    
+}
+
+  
+

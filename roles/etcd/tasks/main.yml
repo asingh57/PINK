@@ -1,0 +1,37 @@
+---
+# tasks file for etcd
+
+- name: setup etcd user
+  raw: |
+    mkdir -p /etc/etcd /var/lib/etcd
+    groupadd -f -g 1501 etcd
+    useradd -c "etcd user" -d /var/lib/etcd -s /bin/false -g etcd -u 1501 etcd
+    chown -R etcd:etcd /var/lib/etcd
+    
+- name: install etcd
+  apt: 
+    name: etcd
+    update_cache: yes
+    
+- name: write etcd config
+  template:
+    src: etcd.j2
+    dest: /lib/systemd/system/etcd.service
+
+    
+    
+- name: enable service etcd 
+  systemd:
+    name: etcd
+    enabled: yes
+    masked: no
+    
+- name: Reload daemon
+  raw: systemctl daemon-reload
+    
+    
+- name: restart service 
+  systemd:
+    name: etcd
+    state: restarted
+    daemon_reload: yes

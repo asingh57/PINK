@@ -1,0 +1,75 @@
+#!/usr/bin/env ansible-playbook
+
+---
+
+- hosts: processing_machine db_server web_server
+  gather_facts: False
+  tasks:
+  - name: install python 2
+    raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+
+    
+- hosts: processing_machine db_server web_server  
+  become: true
+  gather_facts: true
+  
+  
+- hosts: 127.0.0.1
+  connection: local
+  gather_facts: no
+  tasks:
+  - name: copy DB ca cert to web server ssl folder
+    raw: cp ssl_db/ca-cert.pem web_app/ssl/
+
+    
+- hosts: processing_machine
+  gather_facts: no
+  tasks:
+  - name: copy network downloader for nvidia cuda to machine
+    synchronize:
+      src: cuda-repo-ubuntu1810_10.1.105-1_amd64.deb
+      dest: /
+
+- hosts: processing_machine
+  strategy: free
+  remote_user: root
+  roles:
+    - processing_machine
+          
+   
+
+- hosts: etcd_cluster  
+  strategy: free
+  remote_user: root
+  roles:
+    - etcd
+ 
+  
+- hosts: web_server
+  strategy: free
+  remote_user: root
+  roles:
+    - web_server
+    
+
+- hosts: db_server
+  strategy: free
+  remote_user: root
+  roles:
+    - db_server
+    
+    
+- hosts: web_server
+  tasks:
+  - name: start pm2 web app on each web server
+    command: 'pm2 start --name pink_web_app /web_app/server.js'
+  
+- hosts: load_balancer
+  strategy: free
+  remote_user: root
+  roles:
+    - nginx
+    
+    
+    
+  

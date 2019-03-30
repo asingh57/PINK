@@ -1,0 +1,9 @@
+{
+"ca_ssl":"/ssl/abhisingh_ca.ca-bundle",
+"key_ssl":"/ssl/abhisingh_ca.key",
+"crt_ssl":"/ssl/abhisingh_ca.crt",
+"port":443,
+"etcd_addresses":["192.168.1.100:2379","192.168.1.117:2379"],
+"processing_machines":["192.168.1.117"],
+"secrets":["abcd"]
+}

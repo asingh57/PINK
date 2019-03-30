@@ -1,0 +1,10 @@
+---
+# tasks file for db_server
+
+
+
+- name: Copy ssl certs to db server
+  synchronize:
+      src: ssl_db
+      dest: /
+      

@@ -1,2 +1,0 @@
-[dbserver]
-db_s ansible_ssh_host=localhost ansible_port=22 ansible_ssh_user=abhi
