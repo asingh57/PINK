@@ -1,0 +1,222 @@
+#!/usr/bin/python
+import subprocess
+import signal  
+import etcd
+import time
+import sys
+import os
+
+
+#SYSADMIN SHOULD SETUP THESE VARIABLES
+processing_time_allowed=10*60*1000 # how much total time must be given to the docker to run (excluding sigterm time)
+sigterm_time=2*60*1000 #how many minutes before the deadline should a sigterm be given to the docker
+max_uploads_allowed_quota=5 #number of docker image storage allowed on machine
+max_active_containers=2 #max number of images allowed to run at a given time
+uploads_directory="/uploads"
+completed_directory="/completed"
+#####################
+
+
+####################Server status codes
+server_available=0
+server_unavailable=1
+####################
+
+############################## job status codes
+uploaded_to_web_server=0,
+uploaded_to_processing_server=1
+process_errored=2 
+process_stopped_backend_unavailable=3
+process_running=4
+process_completed=5
+###############################
+
+#stop signals
+stop_server_process_uploads=0#mark the server down, accept, no new uploads but keep processing all jobs that are already on there (including unprocessed uploads) # STRONGLY RECOMMENDED
+stop_server_ignore_uploads=1#mark the server down, but keep processing jobs that are already running #SAFE BUT SOFT STOP IS PREFERABLE
+hard_stop_server=2#forcibly stop all containers, without backup #USE ONLY IF ABSOLUTELY NECESSARY SINCE ALL CURRENTLY RUNNING IMAGES WOULD START FROM SCRATCH UPON RESTART
+run_server=3# the server should keep running
+
+ 
+
+current_run_spots_available=max_active_containers
+current_upload_spots_available=max_uploads_allowed_quota
+
+
+client = etcd.Client(host=({% for host in groups['etcd_cluster'] %}("{{ hostvars[host]['ansible_default_ipv4']['address'] }}",2379){% if not loop.last %},{% endif %} {% endfor %}),allow_reconnect=True)
+machine_ip="{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+machine_name= "{{ inventory_hostname }}"
+
+
+os.system("mkdir -p "+uploads_directory)#create uploads directory if it doesnt exist
+os.system("mkdir -p "+completed_directory)#create directory for completed docker's tar files
+
+
+
+def terminateProcess(signalNumber, frame): #hard stop function,
+  client.write('/machines/'+machine_ip+'/status', server_unavailable) # set processing machine as unavailable
+  
+  
+  out = subprocess.Popen(['docker','container', 'ls', '-a','--format','{{ '{{' }}.Name{{ '}}' }}'], 
+     stdout=subprocess.PIPE, 
+     stderr=subprocess.STDOUT)
+  stdout,stderr = out.communicate()
+  
+  
+  running_dockers=stdout.splitlines()# get list of all dockers
+  for docker_name in running_dockers:
+    split = docker_name.split("-")
+    user= split[0]
+    timestamp= split[1]
+  
+    client.write('/users/'+user+'/'+docker_name+'/status', process_stopped_backend_unavailable) #set all dockers as stopped
+    os.system("docker stop --time 1 "+docker_name)  # stop all containers  
+  os.system("docker rm -f $(docker ps -a -q)") # delete them all but not their images
+  os.system("docker volume rm $(docker volume ls -q)") #delete their file systems since everything will restart from scratch to avoid corruption
+  sys.exit()
+    
+signal.signal(signal.SIGTERM, terminateProcess)  #hard stop when sigterm is received
+signal.signal(signal.SIGINT, terminateProcess)
+
+#*********************
+#start all existing images
+
+out = subprocess.Popen(['docker','container', 'ls', '-a','--format','{{ '{{' }}.Name{{ '}}' }}'], 
+       stdout=subprocess.PIPE, 
+       stderr=subprocess.STDOUT)
+stdout,stderr = out.communicate()
+running_dockers=stdout.splitlines()
+    
+    
+for docker_name in running_dockers:
+  split = docker_name.split("-")
+  user= split[0]
+  timestamp= split[1]
+  os.system("docker start "+docker_name)  # start all containers
+  client.write('/users/'+user+'/'+docker_name+'/status', process_running)
+  client.write('/users/'+user+'/'+docker_name+'/processing_machine_address', machine_ip)
+  client.write('/users/'+user+'/'+docker_name+'/processing_machine_name', machine_name)
+  client.write('/users/'+user+'/'+docker_name+'/sigterm_time', int(round(time.time() * 1000))+processing_time_allowed)
+  current_run_spots_available-=1
+#*********************
+
+def run_uploads(running_dockers):
+  out = subprocess.Popen(["ls","-1tr",uploads_directory], #get list of docker images in uploads folder in time ascending order
+         stdout=subprocess.PIPE, 
+         stderr=subprocess.STDOUT)
+  out.wait()
+  stdout,stderr = out.communicate()
+  files_available=stdout.splitlines()
+
+  current_upload_spots_available=max_uploads_allowed_quota-len(files_available)
+  
+  
+  for image_name in files_available:
+    split = image_name.split("-")
+    user= split[0]
+    if int(client.read('/users/'+user+'/'+image_name+'/status').value)!=uploaded_to_processing_server:
+      continue
+    global current_run_spots_available
+    if current_run_spots_available>0:
+    
+      out = subprocess.Popen(["docker", "import",uploads_directory+"/"+image_name]
+      , stdout=subprocess.PIPE, stderr=subprocess.PIPE)# try importing
+      out.wait()
+      (stdout, stderr) = out.communicate()
+      stdout=stdout.rstrip("\r").rstrip("\n")
+      if(out.returncode==0):#get output and set tag
+        
+        os.system("docker tag "+stdout+" "+image_name)      
+        current_run_spots_available-=1
+        os.system("docker run --runtime=nvidia "+image_name)
+        client.write('/users/'+user+'/'+image_name+'/status', process_running)
+        client.write('/users/'+user+'/'+image_name+'/processing_machine_address', machine_ip)
+        client.write('/users/'+user+'/'+image_name+'/processing_machine_name', machine_name)
+        client.write('/users/'+user+'/'+image_name+'/sigterm_time', int(round(time.time() * 1000))+processing_time_allowed)
+        client.write('/users/'+user+'/'+image_name+'/hard_stop_time', int(round(time.time() * 1000))+processing_time_allowed+sigterm_time)
+      else:#invalid image
+        client.write('/users/'+user+'/'+image_name+'/status', process_errored)
+        
+      os.system("rm "+uploads_directory+"/"+image_name)
+      current_upload_spots_available+=1      
+    else:
+      break;
+      
+  client.write('/machines/'+machine_ip+'/upload_spots_available', current_upload_spots_available)
+      
+run_uploads(running_dockers)#do an initial processing of uploads
+
+client.write('/machines/'+machine_ip+'/status', server_available)#make sure server is marked up
+client.write('/machines/'+machine_ip+'/stop_signal', run_server)#make sure server is marked up
+
+
+while True: 
+  #look for a stop signal on etcd. (This will only stop the processing once all jobs have been completed
+  stop_signal=int(client.read('/machines/'+machine_ip+'/stop_signal').value)
+  
+  if(stop_signal==hard_stop_server):#check if server is set as unavailable by one of the web servers
+    #since server status and stop signal are two different things written by two different entities, the at most once property (AMO) is justified
+    os.system("service pink_service stop")
+  else: 
+    current_time=int(round(time.time() * 1000));
+    
+    #populate running dockers list
+    out = subprocess.Popen(['docker' ,'container', 'ls', '--format','{{ '{{' }}.Name{{ '}}' }}'], 
+           stdout=subprocess.PIPE, 
+           stderr=subprocess.STDOUT)
+    stdout,stderr = out.communicate()
+    running_dockers=stdout.splitlines()
+    
+    
+    for docker_name in running_dockers:
+      split = docker_name.split("-")
+      user= split[0]
+      timestamp= split[1]
+      
+      
+      #check if the hard deadline is exceeded on any running dockers
+      if int(client.read('/users/'+user+'/'+docker_name+'/hard_stop_time').value)>=current_time:
+        #copy the docker_output_path into a tar 
+        docker_output_path=  client.read('/users/'+user+'/'+docker_name+'/docker_output_path').value
+        os.system("docker exec "+image_name+" bash -c 'tar -zcvf "+image_name+".tar.gz "+docker_output_path+"'")
+        #stop the docker
+        os.system("docker stop --time 1 "+docker_name)
+        #copy the tar out of the container into the completed_directory
+        os.system("docker cp "+docker_name+":"+docker_output_path +" "+completed_directory)
+        #delete container        
+        os.system("docker rm "+docker_name)
+        #delete image
+        os.system("docker rmi "+docker_name)
+        
+        #make the download location known
+        client.write('/users/'+user+'/'+docker_name+'/output_server', machine_ip)
+        client.write('/users/'+user+'/'+docker_name+'/output_file_path', uploads_directory)
+        
+        #mark as available for download from server
+        client.write('/users/'+user+'/'+docker_name+'/status', process_completed)
+        
+        #increase current_run_spots_available count
+        current_run_spots_available+=1
+        
+      #check if any of these dockers have exceeded the server sigterm time 
+      if int(client.read('/users/'+user+'/'+docker_name+'/sigterm_time').value)>=current_time:
+        os.system("docker kill --signal=SIGTERM "+image_name)#send the SIGTERM to the docker. 
+        #The entrypoint in the dockerfile will receive this and must process this within the sigterm time
+        
+        #now set a hard deadline on etcd
+        current_time=int(round(time.time() * 1000));
+        client.write('/users/'+user+'/'+docker_name+'/hard_stop_time', current_time+sigterm_time)
+        
+    
+    if (stop_signal==stop_server_process_uploads or stop_signal==run_server):
+      run_uploads(running_dockers)# check for any new uploads to process
+      
+  time.sleep(5)
+  
+  
+  
+  
+
+
+
+

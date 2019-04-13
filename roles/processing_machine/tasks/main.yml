@@ -1,28 +1,31 @@
 ---
 # tasks file for processing_machine
+
+- name: remove old docker
+  apt: 
+    name: ['docker','docker-ceS','nvidia-docker2']
+    state: absent
+
+- name: install curl
+  apt: 
+    name: curl
+    update_cache: no
+    
+- name: add docker gpg key
+  raw: |
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+
+- name: cache update
+  apt:
+    update_cache: yes   
+    
  
 - name: install gcc
   apt: 
     name: gcc
     update_cache: yes
     
-- name: remove old docker
-  apt: 
-    name: ['docker','docker-ceS','nvidia-docker2']
-    state: absent
-
-    
-    
-- name: add docker gpg key
-  raw: |
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
-- name: cache update
-  apt:
-    update_cache: yes   
-    
-     
-
 - name: install docker bionic
   apt:
     name: docker-ce=5:18.09.4~3-0~ubuntu-bionic
@@ -32,7 +35,7 @@
     
 - name: install CUDA dependencies
   apt: 
-    name: ['freeglut3','freeglut3-dev','libxi-dev','libxmu-dev','curl','apt-transport-https','ca-certificates','software-properties-common']
+    name: ['freeglut3','freeglut3-dev','libxi-dev','libxmu-dev','curl','apt-transport-https','ca-certificates','software-properties-common','python-pip']
     state: present
 
        
@@ -70,3 +73,32 @@
 - name: restart nvidia daemon
   raw: pkill -SIGHUP dockerd
   
+- name: create folder for uploads  
+  file:
+    path: /uploads
+    state: directory
+
+- name: install python etcd
+  pip:
+    name: python-etcd
+    
+- name: Write pink service template as service
+  template:
+    src: pink_service.j2
+    dest: /etc/init.d/pink_service
+    mode: 740
+
+- name: Write daemon file
+  template:
+    src: processing_daemon.py.j2
+    dest: /processing_daemon.py
+    mode: 740
+    
+- name: enable daemon
+  shell: update-rc.d pink_service defaults
+
+- name: restart service pink service
+  service:
+    name: pink_service
+    state: restarted
+    

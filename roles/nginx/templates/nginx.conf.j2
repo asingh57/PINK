@@ -15,19 +15,6 @@ stream {
         proxy_pass pink_app;
     }
 
-  upstream processing {
-    {% for host in groups['processing_machine'] %}
-      server {{ hostvars[host]['ansible_default_ipv4']['address'] }}:22;
-    {% endfor %}
-  }
-
-
-
-  server {
-        listen 5050;
-        proxy_pass processing;
-    }
-    
     
 }
 

@@ -6,9 +6,14 @@
     name: npm
     update_cache: yes
 
+- name: Install pip
+  apt: 
+    name: python-pip
+    update_cache: yes
+
 - name: Install nodejs
   apt: 
-    name: nodejs
+    name: nodejs 
     
 
    
@@ -17,6 +22,17 @@
       src: web_app
       dest: /
       
+- name: Write config template
+  template:
+    src: config.json.j2
+    dest: /web_app/config.json
+      
+- name: Write upload daemon template
+  template:
+    src: upload_daemon.py.j2
+    dest: /web_app/upload_daemon.py
+
+
 - name: Install package.json dependencies
   npm:
     path: /web_app
@@ -27,7 +43,9 @@
     global: yes
     state: present
     
- 
+- name: install python etcd
+  pip:
+    name: python-etcd
     
 - name: Stop old server if it exists
   command: pm2 delete pink_web_app

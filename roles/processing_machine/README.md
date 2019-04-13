@@ -1,38 +1,54 @@
-Role Name
-=========
+ETCD STRUCTURE
 
-A brief description of the role goes here.
+/machines (These are individual processing machines)
+  IPADDRESS (these are individual IPs)
+    name (name of the machine) (manually assigned by web servers only)
+    status 
+      (status of the machine)
+      possible values: 
+        server_available=0
+        server_unavailable=1
+    upload_spots_available:
+      (number of spots available for uploads) (self calculated by the machine itself)
+    stop_signal
+      (signal by a web server to order machine to shut itself down) (note that the web server will have to ssh into the machine and restart the service pink_service manually)
+      possible values:
+        stop_server_process_uploads=0
+          (mark the server down, accept, no new uploads but keep processing all jobs that are already on there)
+          (including unprocessed uploads) STRONGLY RECOMMENDED, SET IT BACK UP 
+        stop_server_ignore_uploads=1
+          (mark the server down, but keep processing jobs that are already running)
+          #SAFE BUT SOFT STOP IS PREFERABLE
+        hard_stop_server=2
+          (forcibly stop all containers immediately, without backup)
+          #USE ONLY IF ABSOLUTELY NECESSARY SINCE ALL CURRENTLY RUNNING IMAGES WOULD START FROM SCRATCH. THIS STOPS THE SERVICE AND NEEDS TO BE MANUALLY ENABLED
+        run_server=3
+          (keep the server running or start server. Setting this signal will do nothing if a hard stop was made/ the service was stopped)
 
-Requirements
-------------
-
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
-
-Role Variables
---------------
-
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
-
-Dependencies
-------------
-
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
-
-Example Playbook
-----------------
-
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
-
-License
--------
-
-BSD
-
-Author Information
-------------------
-
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+/users (individual users)
+  USERNAME
+    DOCKERNAME
+      status 
+        (status of the individual job)
+          possible values:
+            uploaded_to_web_server=0,
+            uploaded_to_processing_server=1
+            process_errored=2 
+            process_stopped_backend_unavailable=3
+            process_running=4
+            process_completed=5
+      processing_machine_address
+        (address of the machine where it is being processed)
+      processing_machine_name
+        (name of the machine where it gets processed)
+      docker_output_path 
+        (location inside the docker where the output will be present) 
+      sigterm_time
+        (time when sigterm should be sent)
+      hard_stop_time
+        (time when docker should be forcibly stopped)
+      output_server
+        (server where download is made available)
+      output_tar_path
+        (location where this download is located on the output server)
+          

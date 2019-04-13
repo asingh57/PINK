@@ -1,0 +1,20 @@
+#!/usr/bin/env ansible-playbook
+
+- hosts: all
+  become: true
+  gather_facts: true
+  
+  
+- hosts: web_server
+  strategy: free
+  remote_user: root
+  gather_facts: yes
+  roles:
+    - web_server 
+
+
+- hosts: web_server
+  tasks:
+  - name: start pm2 web app on each web server
+    command: 'pm2 start --name pink_web_app /web_app/server.js'
+  
