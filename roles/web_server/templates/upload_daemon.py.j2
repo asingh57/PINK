@@ -6,8 +6,11 @@ import time
 import sys
 import os
 
-uploads_src_directory="uploads"
+dir_path = os.path.dirname(os.path.realpath(__file__))
+uploads_src_directory=dir_path+"/uploads"
 uploads_dest_directory="/uploads"
+os.system("mkdir -p "+uploads_src_directory)#create uploads directory if it doesnt exist
+
 
 ####################Server status codes
 server_available=0
@@ -16,7 +19,7 @@ server_unavailable=1
 
 
 #job status codes:
-uploaded_to_web_server=0,
+uploaded_to_web_server=0
 uploaded_to_processing_server=1
 
 
@@ -28,45 +31,78 @@ run_server=3# the server should keep running
 
 
 client = etcd.Client(host=({% for host in groups['etcd_cluster'] %}("{{ hostvars[host]['ansible_default_ipv4']['address'] }}",2379){% if not loop.last %},{% endif %} {% endfor %}),allow_reconnect=True)
-processing_machine_ips=[{% for host in groups['processing_machine'] %}"{{ hostvars[host]['ansible_default_ipv4']['address'] }}"{% if not loop.last %},{% endif %} {% endfor %}]
+processing_machine_ips=[]
+#{% for host in groups['processing_machine'] %}"{{ hostvars[host]['ansible_default_ipv4']['address'] }}"{% if not loop.last %},{% endif %} {% endfor %}
 
+def update_machines_list():
+  try:
+    machine_keys=client.read('/machines')._children
+    ret_arr=[]
+    for x in machine_keys:
+      ret_arr.append(x["key"].encode('ascii','ignore'))#convert unicode to ascii
+    global processing_machine_ips
+    processing_machine_ips=ret_arr
+  except etcd.EtcdException: 
+    return
+
+print ("starting daemon")
+
+def utf_to_int(ut_str):#converts utf to int
+  return int(ut_str.encode('ascii','ignore'))
 
 while(True):
-	out = subprocess.Popen(["ls","-1tr",uploads_src_directory], #get list of uploaded files
-		       stdout=subprocess.PIPE, 
-		       stderr=subprocess.STDOUT)
-	out.wait()
-	stdout,stderr = out.communicate()
-	files_available=stdout.splitlines()
+  update_machines_list()
+  time.sleep(5)
+  
+  if len(processing_machine_ips)==0:
+    continue
+  
+  out = subprocess.Popen(["ls","-1tr",uploads_src_directory], #get list of uploaded files
+           stdout=subprocess.PIPE, 
+           stderr=subprocess.STDOUT)
+  out.wait()
+  stdout,stderr = out.communicate()
+  files_available=stdout.splitlines()
 
+  print ("files:")
+  print(files_available)
 
-
-	for image_name in files_available:
-		split = image_name.split("-")
-		user= split[0]
-		try:
-			if int(client.read('/users/'+user+'/'+image_name+'/status').value)==uploaded_to_web_server:
-					for i in processing_machine_ips:
-						try:
-							if(int(client.read('/machines/'+i+'/status').value)==server_available 
-								and 
-								int(client.read('/machines/'+i+'/stop_signal').value)==run_server):				
-								out = subprocess.Popen(["scp", uploads_src_directory+"/"+image_name,'root@'+i+':'+uploads_dest_directory+"/"+image_name]
-								, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-								out.wait()
-								(stdout, stderr) = out.communicate()
-								if(out.returncode==0):
-									client.write('/users/'+user+'/'+image_name+'/status',uploaded_to_processing_server)
-									os.system("rm "+uploads_src_directory+"/"+image_name)
-									break
-						except etcd.EtcdKeyNotFound:		
-							print(i+" server key not found")			
-						
-		except etcd.EtcdKeyNotFound:		
-			print(" server key not found")			
-	time.sleep(5)
-		    
-			
+  for image_name in files_available:
+    split = image_name.split("-")
+    user= split[0]
+    try:
+      if utf_to_int(client.read('/users/'+user+'/'+image_name+'/status').value)==uploaded_to_web_server:
+          for i in processing_machine_ips: #go through processing machines to find one that works
+            try:
+              if(utf_to_int(client.read(i+'/status').value)==server_available 
+                and 
+                utf_to_int(client.read(i+'/stop_signal').value)==run_server):        
+                out = subprocess.Popen(["scp","-o","StrictHostKeyChecking=no","-o","UserKnownHostsFile=/dev/null", uploads_src_directory+"/"+image_name,'root@'+i.split('/')[-1]+':'+uploads_dest_directory+"/"+image_name]
+                , stdout=subprocess.PIPE, stderr=subprocess.PIPE) 
+                out.wait()
+                (stdout, stderr) = out.communicate()
+                if(out.returncode==0):
+                  client.write('/users/'+user+'/'+image_name+'/status',uploaded_to_processing_server)
+                  client.write('/users/'+user+'/'+image_name+'/processing_machine_address',i.split('/')[-1])
+                  os.system("rm "+uploads_src_directory+"/"+image_name)
+                  print("upload to processing server successful for "+'/users/'+user+'/'+image_name)
+                  break
+                else:
+                  print("upload failed for "+'/users/'+user+'/'+image_name)
+                  
+                  print(stderr)  
+            except etcd.EtcdException:    
+              print(i+" machine key not found")      
+      elif(utf_to_int(client.read('/users/'+user+'/'+image_name+'/status').value)>uploaded_to_web_server):#delete from local web server if it has already been received by processing machine
+        os.system("rm "+uploads_src_directory+"/"+image_name)
+        print("stray file found and removed for: "+'/users/'+user+'/'+image_name+'/status')
+      else:
+        print("no etcd key of value "+'/users/'+user+'/'+image_name+'/status')
+    except etcd.EtcdException:    
+      print(user+" user key not found")    
+      
+        
+      
 
 
 

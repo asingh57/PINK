@@ -1,0 +1,62 @@
+#!/bin/bash
+NAME=pink_service
+### BEGIN INIT INFO
+# Provides:          $NAME
+# Required-Start:    $local_fs $network $named $time $syslog
+# Required-Stop:     $local_fs $network $named $time $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Description:       Runs processing daemon for pinkdb
+### END INIT INFO
+PIDFILE=/var/run/${NAME}.pid
+LOGFILE=/var/log/${NAME}.log
+CMD=/processing_daemon.py
+
+PINK="\033[35;1;4m"
+RED="\033[31;1;4m"
+END="\033[0m\n"
+
+start() {
+    if [ -f $PIDFILE ]; then
+            printf  "${PINK}Service already running: ${PIDFILE}$END"
+            exit 1
+    fi
+    $CMD &> $LOGFILE &
+    sleep 1
+    PID=`pgrep -fn "$CMD"`
+    if [ -z $PID ]; then
+        printf  "${RED}Failed to start $NAME$END"
+    else
+        echo  $PID > $PIDFILE
+        printf  "${PINK}$NAME is now running$END"
+    fi
+}
+
+stop() {
+  printf  "${PINK}Stopping $NAME$END"
+  PID=`cat $PIDFILE`
+  echo $PID 
+  if [ -f $PIDFILE ]; then
+      kill $PID
+      rm -f $PIDFILE
+      printf  "${PINK}Stopped service$END"
+  else
+      printf  "${RED}Program is not running$END"
+  fi
+}
+
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  *)
+    printf  "${PINK}Usage: $0 {start|stop|restart}$END"
+esac

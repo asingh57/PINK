@@ -15,6 +15,9 @@
   apt: 
     name: nodejs 
     
+- name: Install sshfs
+  apt: 
+    name: sshfs
 
    
 - name: Copy web app to web server

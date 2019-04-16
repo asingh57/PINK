@@ -84,7 +84,7 @@
     
 - name: Write pink service template as service
   template:
-    src: pink_service.j2
+    src: pink_service.sh.j2
     dest: /etc/init.d/pink_service
     mode: 740
 

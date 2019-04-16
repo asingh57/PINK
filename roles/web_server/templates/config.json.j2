@@ -7,7 +7,6 @@
 "etcd_addresses": [{% for host in groups['etcd_cluster'] %}"{{ hostvars[host]['ansible_default_ipv4']['address'] }}:2379"{% if not loop.last %},{% endif %} {% endfor %}],
 "processing_machines":[{% for host in groups['processing_machine'] %}"{{ hostvars[host]['ansible_default_ipv4']['address'] }}"{% if not loop.last %},{% endif %} {% endfor %}],
 "secrets":["abcd"],
-"nginx_upload_ip":[{% for host in groups['load_balancer'] %}"{{ hostvars[host]['ansible_default_ipv4']['address'] }}"{% endfor %}],
-"upload_port":5050,
-"upload_user":"root"
+"upload_user":"root",
+"remote_upload_folder":"/uploads"
 }

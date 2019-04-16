@@ -16,7 +16,11 @@ var etcd = new Etcd(config.etcd_addresses);
 
 const statuscodes={
   "uploaded_to_web_server":0,
-  "uploaded_to_processing_server":1
+  "uploaded_to_processing_server":1,
+  "process_errored":2 ,
+  "process_stopped_backend_unavailable":3,
+  "process_running":4,
+  "process_completed":5
 }
 
 const app = express();
@@ -48,7 +52,7 @@ var storage = sftpStorage({
 
 var storage = multer.diskStorage({ //multers disk storage settings
       destination: function (req, file, cb) {
-         cb(null, __dirname +'/upload');
+         cb(null, __dirname +'/uploads');
       },
       filename: function (req, file, cb) {
           var filename=req.session.user + '-' + Date.now();
@@ -123,6 +127,83 @@ app.get('/', (req, res) => {
 });
 
 
+var machine_list={}
+var user_job_list={}
+
+function machine_list_update(){
+  etcd.get("/machines", { recursive: true }, function(err,data){
+    machine_list=data;
+    console.log("updates detected to machines");
+  });
+}
+function user_list_update(){
+  etcd.get("/users", { recursive: true }, function(err,data){
+    user_job_list=data;
+    console.log("updates detected to users");
+  
+  });
+}
+machine_list_update();//get one time lists of users and machines
+user_list_update();
+
+server_status_watcher = etcd.watcher("/machines", null,  {recursive: true});
+server_status_watcher.on("change", machine_list_update);
+job_status_watcher = etcd.watcher("/users", null,  {recursive: true});
+job_status_watcher.on("change", user_list_update);
+
+function get_server_status_str(){
+  return JSON.stringify(machine_list);
+}
+
+function get_job_status_str(req){
+  return JSON.stringify(user_job_list);
+}
+
+
+app.post('/login', (req, res) => {
+  res.redirect('/dashboard')
+  
+  
+})
+
+
+app.get('/dashboard', (req, res) => {
+  
+  
+  if(login(req)){
+    var server_status_str=get_server_status_str();
+    var job_status_str=get_job_status_str(req);
+    
+    res.send(`
+    <html>
+    <body>
+    Jobs<br>
+    </br>
+    <a href="/uploads_page">Upload a new job</a>
+    </br>
+    Your jobs:</br>
+    <div id="job_status">
+    `
+    +job_status_str+
+    `
+    </div>
+    </br>
+    Server Status:</br>
+    <div id="server_status">
+    `
+    +server_status_str+
+    `
+    </div>
+    </body>
+    </html>
+    `);   
+  }
+  else{
+    res.redirect("/");  
+  }
+  
+});
+
 
 
 app.get('/get_user_active_jobs', (req, res) => {
@@ -130,10 +211,13 @@ app.get('/get_user_active_jobs', (req, res) => {
     
 });
 
-function login(req){// implement login here
-  console.log("body", req.body);
+function login(req){// IMPORTANT implement your own proper Login here
+  console.log("body", req.body, req.session);
   if(req.session.user || (req.body.user && req.body.password && req.body.password=="abc" && req.body.password=="abc")){
-    req.session.user=req.body.user;
+    if(!req.session.user){
+      req.session.user=req.body.user;
+    }
+    
     req.session.save();
     return true;
   }
@@ -141,12 +225,13 @@ function login(req){// implement login here
 }
 
 
-app.post('/login', (req, res) => {
+app.get('/uploads_page', (req, res) => {
   
   if(login(req)){
     res.send(`
     <html>
     <body>
+    <a href="/dashboard">dashboard</a><br>
     Login<br>
     </br>
     <form action="/upload_job" method="post" enctype="multipart/form-data">
@@ -166,22 +251,13 @@ app.post('/login', (req, res) => {
 
 
 
-app.post('/login_cli', (req, res) => {
-  
-  if(login(req)){
-    res.send("You have logged in\n");    
-  }
-  else{ 
-    res.send("The credentials you entered are not valid\n"+req.body.user);  
-  }
 
-});
 
-function update_key(key,subkey,key_val_list,next){//blocking function to update etcd key
+function update_key(key,key_val_list,next){//blocking function to update etcd key
   try{
     
     for (var key_v in key_val_list) {
-      etcd.setSync(key+"/"+subkey+"/"+key_v,key_val_list[key_v]);
+      etcd.setSync(key+"/"+key_v,key_val_list[key_v]);
     }
     next(null);
   }
@@ -221,7 +297,8 @@ function update_key(key,subkey,key_val_list,next){//blocking function to update 
     */
     
 }
-  
+
+
 
 
 
@@ -231,10 +308,22 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
     var filename=req.file.filename;
     var status_value={status:statuscodes.uploaded_to_web_server, web_server_address:httpsServer.address().address};
     
-    update_key(req.session.user,filename,status_value,
+    update_key("/users/"+req.session.user+"/"+filename,status_value,
       function(err){
         if(!err){
-           res.send("Upload succeeded, file is being read by server\n"); 
+           res.send(`
+           <html>
+           <body>
+           Upload succeeded, file is being read by server. Redirecting...
+           </body>
+           
+           <script>
+           setTimeout(function () {
+                    window.location ="/dashboard"
+            }, 5000);
+           </script>
+           </html>
+           `)
         }
         else{
           console.log("error before res send: "+err);
@@ -252,11 +341,19 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
 });
 
 var spawn = require('child_process').spawn;
-spawn('python', ['upload_daemon.py'], {
-    detached: false
+var daemon_child=spawn('python', [__dirname + '/' +'upload_daemon.py'], {
+      detached: false
 });
 
-
+daemon_child.stdout.on('data', function(data) {
+    console.log('upload daemon stdout: ' + data);
+});
+daemon_child.stderr.on('data', function(data) {
+    console.log('upload daemon stderr: ' + data);
+});
+daemon_child.on('close', function(code) {
+    console.log('upload daemon exit code: ' + code);
+});
 
 
 /*
