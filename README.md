@@ -59,7 +59,7 @@ deploy the ansible playbooks using
 ansible-playbook site.yml -i servers
 ```
 
-Now the app should be accessible on port 22 of your nginx server. The nginx server will forward your http requests to the web servers.
+Now the app should be accessible on port 443 of your nginx server. The nginx server will forward your http requests to the web servers.
 
 The following happens upon deployment:
 One by one ansible ssh'es into each of the machines specified in servers file
