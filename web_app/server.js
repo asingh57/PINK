@@ -23,6 +23,15 @@ const statuscodes={
   "process_completed":5
 }
 
+var statuscode_to_error={
+  0:{"description":"You job has been uploaded to the web server","color":"yellow"},
+  1:{"description":"Your job has been queued at the processing server","color":"yellow"},
+  2:{"description":"Your job failed","color":"red"},
+  3:{"description":"The backend server processing your job is currently unavailable","color":"orange"},
+  4:{"description":"Your job is currently in progress","color":"green"},
+  5:{"description":"Your job has been completed and is available for download","color":"green"}
+}
+
 const app = express();
 app.set('trust proxy', 1) // trust first proxy
 
@@ -151,21 +160,94 @@ server_status_watcher.on("change", machine_list_update);
 job_status_watcher = etcd.watcher("/users", null,  {recursive: true});
 job_status_watcher.on("change", user_list_update);
 
-function get_server_status_str(){
-  return JSON.stringify(machine_list);
+function get_server_status_str(){  
+  
+
+  return JSON.stringify(parse_etcd_json(machine_list));
 }
 
 function get_job_status_str(req){
-  return JSON.stringify(user_job_list);
+  return JSON.stringify(parse_etcd_json(user_job_list));
 }
-
+ 
 
 app.post('/login', (req, res) => {
-  res.redirect('/dashboard')
-  
+  if(login(req)){
+    res.redirect('/dashboard')
+  }
+  else{
+    res.redirect('/')
+  }
   
 })
+/*
+if (!Array.prototype.last){//method to get last element of array easily
+    Array.prototype.last = function(){
+        return this[this.length - 1];
+    };
+};
+*/
 
+function parse_etcd_json(etcd_object){//returns a readable json
+  
+  console.log(typeof etcd_object);
+  console.log(JSON.stringify(etcd_object));
+  
+  if(Array.isArray(etcd_object)){
+    console.log("got an array "+JSON.stringify(etcd_object));
+    var ret={"values":[]};
+    for(var x=0; x<len(etcd_object);x++){
+      ret.values.push(parse_etcd_json(etcd_object[x]));
+    }
+    return ret;
+  }
+  
+  var key="";
+  var value="";
+  var keys=Object.keys(etcd_object)
+  for(var i=0;i<keys.length;i++){
+    var item=keys[i];
+    console.log("item "+item);
+    if(item=="key"){
+      key=etcd_object[item];
+      console.log("got key"+key);
+    }
+    else if(item=="value"){
+      value=etcd_object[item];
+      console.log("got value"+value);
+    }
+    else if(item=="nodes"){
+      if(!etcd_object[item][0].value){
+        value=[];
+        for(var p=0;p<etcd_object[item].length;p++){
+          sub_item=etcd_object[item][p]
+          console.log("sub item is"+JSON.stringify(sub_item));
+          value.push(parse_etcd_json(sub_item));
+        }
+      }
+      else{
+        value={};
+        for(var p=0;p<etcd_object[item].length;p++){
+          sub_item=etcd_object[item][p]
+          console.log("sub item is"+JSON.stringify(sub_item));
+          Object.assign(value,parse_etcd_json(sub_item));
+        }
+      }
+      console.log("got array of values"+JSON.stringify(value));
+    }
+    else if(item=="node"){
+      value=parse_etcd_json(etcd_object[item]);
+      console.log("item is a node:"+JSON.stringify(value));
+    }
+  }
+  if(key==""){
+    return value;
+  }
+  console.log("key "+key+" value "+JSON.stringify(value));
+  var ret_val={};
+  ret_val[key]=value;
+  return ret_val;
+}
 
 app.get('/dashboard', (req, res) => {
   
@@ -173,7 +255,7 @@ app.get('/dashboard', (req, res) => {
   if(login(req)){
     var server_status_str=get_server_status_str();
     var job_status_str=get_job_status_str(req);
-    
+   
     res.send(`
     <html>
     <body>
@@ -212,7 +294,6 @@ app.get('/get_user_active_jobs', (req, res) => {
 });
 
 function login(req){// IMPORTANT implement your own proper Login here
-  console.log("body", req.body, req.session);
   if(req.session.user || (req.body.user && req.body.password && req.body.password=="abc" && req.body.password=="abc")){
     if(!req.session.user){
       req.session.user=req.body.user;
@@ -220,6 +301,9 @@ function login(req){// IMPORTANT implement your own proper Login here
     
     req.session.save();
     return true;
+  }
+  else{
+    return false;
   }
   return false;
 }
