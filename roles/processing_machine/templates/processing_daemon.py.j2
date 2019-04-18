@@ -9,8 +9,8 @@ import os
 
 
 #SYSADMIN SHOULD SETUP THESE VARIABLES
-processing_time_allowed=10*60*1000 # how much total time must be given to the docker to run (excluding sigterm time)
-sigterm_time=2*60*1000 #how many minutes before the deadline should a sigterm be given to the docker
+processing_time_allowed=10*60*10#00 # how much total time must be given to the docker to run (excluding sigterm time)
+sigterm_time=2*60*10#00 #how many minutes before the deadline should a sigterm be given to the docker
 max_uploads_allowed_quota=5 #number of docker image storage allowed on machine
 max_active_containers=2 #max number of images allowed to run at a given time
 uploads_directory="/uploads"
@@ -115,7 +115,7 @@ def get_delete_queue():#gets list of deletions that are not running for all user
   except etcd.EtcdException: 
     return list
   except IndexError: 
-    return list
+    return list 
   return list
 
 def eprint(*args, **kwargs):
@@ -174,24 +174,39 @@ def run_uploads(running_dockers):
     if utf_to_int(etcd_loop_till_read('/users/'+user+'/'+image_name+'/status').value)!=uploaded_to_processing_server:
       continue
     global current_run_spots_available
-    if current_run_spots_available>0:
     
-      out = subprocess.Popen(["docker", "import",uploads_directory+"/"+image_name]
+    command=etcd_loop_till_read('/users/'+user+'/'+image_name+'/entrypoint').value.encode('ascii','ignore')
+    if current_run_spots_available>0:
+      arr=["docker", "load","-i"
+          ,uploads_directory+"/"+image_name
+          ] 
+      eprint(" ".join(arr))
+      out = subprocess.Popen(["docker", "load","-i"
+          ,uploads_directory+"/"+image_name
+          ]
       , stdout=subprocess.PIPE, stderr=subprocess.PIPE)# try importing
       out.wait()
       (stdout, stderr) = out.communicate()
-      stdout=stdout.rstrip("\r").rstrip("\n")
+
       if(out.returncode==0):#get output and set tag
+        eprint(stdout.split(" "))
+        old_img=stdout.split(" ")[-1].rstrip("\n")
+        new_img=image_name
+        os.system("docker tag "+old_img+" "+new_img)
+        os.system("docker rmi "+old_img)
         
-        os.system("docker tag "+stdout+" "+image_name)      
         current_run_spots_available-=1
-        os.system("docker run --runtime=nvidia "+image_name)
+        os.system("docker run -d "+" --runtime=nvidia "+" --name "+image_name+" "+image_name)
+        eprint("docker run -d "+" --runtime=nvidia "+" --name "+image_name+" "+image_name)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/status', process_running)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/processing_machine_address', machine_ip)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/processing_machine_name', machine_name)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/sigterm_time', utf_to_int(round(time.time() * 1000))+processing_time_allowed)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/hard_stop_time', utf_to_int(round(time.time() * 1000))+processing_time_allowed+sigterm_time)
+        
       else:#invalid image
+        eprint(stdout)
+        eprint(stderr)
         etcd_loop_till_write('/users/'+user+'/'+image_name+'/status', process_errored)
         
       os.system("rm "+uploads_directory+"/"+image_name)
@@ -210,7 +225,6 @@ etcd_loop_till_write('/machines/'+machine_ip+'/stop_signal', run_server)#make su
 
 while True: 
   
-
   if terminate: # check if sigint was received
     break
   
@@ -224,7 +238,7 @@ while True:
     current_time=utf_to_int(round(time.time() * 1000));
     
     #populate running dockers list
-    out = subprocess.Popen(['docker' ,'container', 'ls', '--format','{{ '{{' }}.Name{{ '}}' }}'], 
+    out = subprocess.Popen(['docker' ,'images','--format','{{ '{{' }}.Repository{{ '}}' }}'], 
            stdout=subprocess.PIPE, 
            stderr=subprocess.STDOUT)
     stdout,stderr = out.communicate()
@@ -259,7 +273,7 @@ while True:
         #stop the docker
         os.system("docker stop --time 1 "+docker_name)
         #copy the tar out of the container into the completed_directory
-        os.system("docker cp "+docker_name+":"+docker_output_path+ file_name +" "+completed_directory)
+        os.system("docker cp "+docker_name+":"+ file_name +" "+completed_directory)
         #delete container        
         os.system("docker rm "+docker_name)
         #delete image
@@ -273,7 +287,7 @@ while True:
         
       #check if any of these dockers have exceeded the server sigterm time 
       if utf_to_int(etcd_loop_till_read('/users/'+user+'/'+docker_name+'/sigterm_time').value)>=current_time:
-        os.system("docker kill --signal=SIGTERM "+image_name)#send the SIGTERM to the docker. 
+        os.system("docker kill --signal=SIGTERM "+docker_name)#send the SIGTERM to the docker. 
         #The entrypoint in the dockerfile will receive this and must process this within the sigterm time
         
         #now set a hard deadline on etcd

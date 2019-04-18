@@ -251,12 +251,12 @@ app.get('/download', (req, res) => {
   }
   //check validity of user
   var usr_recv=req.query.job_id.split("-")[0];
-  if(usr_recv!=req.session.user || etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status")!=job_status_codes.process_completed){
+  console.log(etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status"));
+  if(usr_recv!=req.session.user || etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status").body.node.value!=job_status_codes.process_completed){
     res.redirect("/dashboard");
     return;
   }
-  
-  var server_name=etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/processing_machine_address");//get processing server name for this job
+  var server_name=etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/processing_machine_address").body.node.value;//get processing server name for this job
   
   var local_dir_name=__dirname + "/processing_server_mounts/"+req.query.job_id;
   
@@ -448,7 +448,8 @@ app.get('/uploads_page', (req, res) => {
     <a href="/logout">logout</a><br>
     </br>
     <form action="/upload_job" method="post" enctype="multipart/form-data">
-    <input type="file" name="docker_image">
+    Upload file:<input type="file" name="docker_image">
+    Entrypoint command:<input type="text" name="container_entrypoint"></input>
     <button type="submit">Upload</button >
     </button>
     </body>
@@ -519,8 +520,10 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
   if(req.session.user && req.file){
     //multer handle
     var filename=req.file.filename;
-    var status_value={status:job_status_codes.uploaded_to_web_server, web_server_address:httpsServer.address().address};
-    
+    var status_value={status:job_status_codes.uploaded_to_web_server, 
+    web_server_address:httpsServer.address().address,
+    entrypoint:req.body.container_entrypoint};
+    console.log(req.body);
     update_key("/users/"+req.session.user+"/"+filename,status_value,
       function(err){
         if(!err){
