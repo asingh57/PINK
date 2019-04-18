@@ -14,7 +14,7 @@ const config = JSON.parse(fs.readFileSync(__dirname +'/config.json'));//config s
 var etcd = new Etcd(config.etcd_addresses);
 //var sftpStorage = require('multer-sftp');
 
-const statuscodes={
+const job_status_codes={
   "uploaded_to_web_server":0,
   "uploaded_to_processing_server":1,
   "process_errored":2 ,
@@ -22,8 +22,12 @@ const statuscodes={
   "process_running":4,
   "process_completed":5
 }
+const machine_status_codes={
+  "server_available":0,
+  "server_unavailable":1
+}
 
-var statuscode_to_error={
+const job_status_code_to_error={
   0:{"description":"You job has been uploaded to the web server","color":"yellow"},
   1:{"description":"Your job has been queued at the processing server","color":"yellow"},
   2:{"description":"Your job failed","color":"red"},
@@ -31,6 +35,13 @@ var statuscode_to_error={
   4:{"description":"Your job is currently in progress","color":"green"},
   5:{"description":"Your job has been completed and is available for download","color":"green"}
 }
+
+const machine_status_code_to_error={
+  0:{"description":"Server is running","color":"green"},
+  1:{"description":"Server is down","color":"red"}
+}
+
+
 
 const app = express();
 app.set('trust proxy', 1) // trust first proxy
@@ -141,15 +152,12 @@ var user_job_list={}
 
 function machine_list_update(){
   etcd.get("/machines", { recursive: true }, function(err,data){
-    machine_list=data;
-    console.log("updates detected to machines");
+    machine_list=parse_etcd_json(data);
   });
 }
 function user_list_update(){
   etcd.get("/users", { recursive: true }, function(err,data){
-    user_job_list=data;
-    console.log("updates detected to users");
-  
+    user_job_list=parse_etcd_json(data);
   });
 }
 machine_list_update();//get one time lists of users and machines
@@ -161,13 +169,61 @@ job_status_watcher = etcd.watcher("/users", null,  {recursive: true});
 job_status_watcher.on("change", user_list_update);
 
 function get_server_status_str(){  
+  //return JSON.stringify(machine_list);
+  var machine_dup=machine_list
+  var to_ret="";
+  for(var i=0;i<machine_dup.machines.length;i++){
+    var machine=Object.keys(machine_dup.machines[i])[0];
+    to_ret+="machine name:";
+    to_ret+=machine;
+    to_ret+="</br>";
+    to_ret+="machine status:";
+    to_ret+=machine_status_code_to_error[machine_dup.machines[i][machine].status].description;
+    to_ret+="</br>";
+    to_ret+="number of slots available:";
+    to_ret+=machine_dup.machines[i][machine].upload_spots_available;
+    to_ret+="</br>";
+  }
   
-
-  return JSON.stringify(parse_etcd_json(machine_list));
+  return to_ret;
+  
 }
 
 function get_job_status_str(req){
-  return JSON.stringify(parse_etcd_json(user_job_list));
+  //return JSON.stringify(user_job_list);
+  var job_dup=user_job_list
+  var to_ret="";
+  var users=user_job_list["users"];
+  if(!users){
+    return "";
+  }
+  
+  for(var i=0;i<users.length;i++){
+    var user_name=Object.keys(users[i])[0];
+    if(user_name!=req.session.user){
+      continue;
+    }
+    var jobs=users[i][user_name];  
+    if(!jobs){
+        return "";
+    }
+    for(var j=0;j<jobs.length;j++){
+      var job_name=Object.keys(jobs[j])[0];
+      to_ret+="Job name:";
+      to_ret+=job_name;
+      to_ret+="</br>";
+      to_ret+="job status:";
+      to_ret+=job_status_code_to_error[jobs[j][job_name].status].description;
+      to_ret+="</br>";
+      to_ret+="Machine where job is processed:";
+      to_ret+=jobs[j][job_name].processing_machine_address;
+      to_ret+="</br>";      
+    }
+    break;
+  }
+  
+  return to_ret;
+  
 }
  
 
@@ -188,40 +244,32 @@ if (!Array.prototype.last){//method to get last element of array easily
 };
 */
 
-function parse_etcd_json(etcd_object){//returns a readable json
-  
-  console.log(typeof etcd_object);
-  console.log(JSON.stringify(etcd_object));
-  
+function parse_etcd_json(etcd_object){//returns a readable json from etcd values
+
   if(Array.isArray(etcd_object)){
-    console.log("got an array "+JSON.stringify(etcd_object));
     var ret={"values":[]};
     for(var x=0; x<len(etcd_object);x++){
       ret.values.push(parse_etcd_json(etcd_object[x]));
     }
     return ret;
-  }
-  
+  }  
   var key="";
   var value="";
   var keys=Object.keys(etcd_object)
   for(var i=0;i<keys.length;i++){
     var item=keys[i];
-    console.log("item "+item);
     if(item=="key"){
-      key=etcd_object[item];
-      console.log("got key"+key);
+      key=etcd_object[item].split("/");
+      key=key[key.length-1];
     }
     else if(item=="value"){
       value=etcd_object[item];
-      console.log("got value"+value);
     }
     else if(item=="nodes"){
       if(!etcd_object[item][0].value){
         value=[];
         for(var p=0;p<etcd_object[item].length;p++){
           sub_item=etcd_object[item][p]
-          console.log("sub item is"+JSON.stringify(sub_item));
           value.push(parse_etcd_json(sub_item));
         }
       }
@@ -229,21 +277,17 @@ function parse_etcd_json(etcd_object){//returns a readable json
         value={};
         for(var p=0;p<etcd_object[item].length;p++){
           sub_item=etcd_object[item][p]
-          console.log("sub item is"+JSON.stringify(sub_item));
           Object.assign(value,parse_etcd_json(sub_item));
         }
       }
-      console.log("got array of values"+JSON.stringify(value));
     }
     else if(item=="node"){
       value=parse_etcd_json(etcd_object[item]);
-      console.log("item is a node:"+JSON.stringify(value));
     }
   }
   if(key==""){
     return value;
   }
-  console.log("key "+key+" value "+JSON.stringify(value));
   var ret_val={};
   ret_val[key]=value;
   return ret_val;
@@ -390,7 +434,7 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
   if(req.session.user && req.file){
     //multer handle
     var filename=req.file.filename;
-    var status_value={status:statuscodes.uploaded_to_web_server, web_server_address:httpsServer.address().address};
+    var status_value={status:job_status_codes.uploaded_to_web_server, web_server_address:httpsServer.address().address};
     
     update_key("/users/"+req.session.user+"/"+filename,status_value,
       function(err){
