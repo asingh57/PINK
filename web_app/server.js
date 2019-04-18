@@ -12,6 +12,8 @@ var curl = require("etcd-lock");
 var os = require("os");
 const config = JSON.parse(fs.readFileSync(__dirname +'/config.json'));//config stored outside repo for security reasons
 var etcd = new Etcd(config.etcd_addresses);
+const { spawnSync} = require('child_process');
+var processing_server_download_folder="/completed";
 //var sftpStorage = require('multer-sftp');
 
 const job_status_codes={
@@ -20,26 +22,34 @@ const job_status_codes={
   "process_errored":2 ,
   "process_stopped_backend_unavailable":3,
   "process_running":4,
-  "process_completed":5
+  "process_completed":5,
+  "deleting_job":6
 }
 const machine_status_codes={
   "server_available":0,
   "server_unavailable":1
 }
 
-const job_status_code_to_error={
-  0:{"description":"You job has been uploaded to the web server","color":"yellow"},
-  1:{"description":"Your job has been queued at the processing server","color":"yellow"},
-  2:{"description":"Your job failed","color":"red"},
-  3:{"description":"The backend server processing your job is currently unavailable","color":"orange"},
-  4:{"description":"Your job is currently in progress","color":"green"},
-  5:{"description":"Your job has been completed and is available for download","color":"green"}
+const delete_signal_codes={
+  "dont_delete":0,
+  "delete":1
 }
 
-const machine_status_code_to_error={
-  0:{"description":"Server is running","color":"green"},
-  1:{"description":"Server is down","color":"red"}
-}
+
+const job_status_code_to_error={}
+job_status_code_to_error[job_status_codes.uploaded_to_web_server]={"description":"You job has been uploaded to the web server","color":"yellow"};
+job_status_code_to_error[job_status_codes.uploaded_to_processing_server]={"description":"Your job has been queued at the processing server","color":"yellow"};
+job_status_code_to_error[job_status_codes.process_errored]={"description":"Your job failed","color":"red"};
+job_status_code_to_error[job_status_codes.process_stopped_backend_unavailable]={"description":"The backend server processing your job is currently unavailable","color":"orange"};
+job_status_code_to_error[job_status_codes.process_running]={"description":"Your job is currently in progress","color":"green"};
+job_status_code_to_error[job_status_codes.process_completed]={"description":"Your job has been completed and is available for download","color":"green"};
+job_status_code_to_error[job_status_codes.deleting_job]={"description":"Currently deleting job","color":"red"};
+
+
+const machine_status_code_to_error={}
+machine_status_code_to_error[machine_status_codes.server_available]={"description":"Server is running","color":"green"};
+machine_status_code_to_error[machine_status_codes.server_unavailable]={"description":"Server is down","color":"red"};
+
 
 
 
@@ -189,6 +199,8 @@ function get_server_status_str(){
   
 }
 
+
+
 function get_job_status_str(req){
   //return JSON.stringify(user_job_list);
   var job_dup=user_job_list
@@ -212,8 +224,14 @@ function get_job_status_str(req){
       to_ret+="Job name:";
       to_ret+=job_name;
       to_ret+="</br>";
-      to_ret+="job status:";
+      to_ret+="Status:";
       to_ret+=job_status_code_to_error[jobs[j][job_name].status].description;
+      if(jobs[j][job_name].status==job_status_codes.process_completed){
+        to_ret+="<a href=\"/download?job_id="+job_name+"\" download>Download Output</a>";
+      }
+      if(jobs[j][job_name].status>=job_status_codes.process_errored){
+        to_ret+="<a href=\"/delete?job_id="+job_name+"\">Delete Job</a>"
+      }
       to_ret+="</br>";
       to_ret+="Machine where job is processed:";
       to_ret+=jobs[j][job_name].processing_machine_address;
@@ -226,6 +244,62 @@ function get_job_status_str(req){
   
 }
  
+app.get('/download', (req, res) => {
+  if(!login(req)){
+    res.redirect("/");
+    return;   
+  }
+  //check validity of user
+  var usr_recv=req.query.job_id.split("-")[0];
+  if(usr_recv!=req.session.user || etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status")!=job_status_codes.process_completed){
+    res.redirect("/dashboard");
+    return;
+  }
+  
+  var server_name=etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/processing_machine_address");//get processing server name for this job
+  
+  var local_dir_name=__dirname + "/processing_server_mounts/"+req.query.job_id;
+  
+  //mount remote fs
+  var dir_create = spawnSync('mkdir', ['-p', local_dir_name]);
+  
+  var mount_remote_fs = spawnSync(
+  'sshfs', 
+  [
+  '-o', 
+  'StrictHostKeychecking=no',
+  'root@'+server_name+":"+processing_server_download_folder,
+  local_dir_name
+  ]
+  );
+  
+  var file_path=local_dir_name+"/"+req.query.job_id+".tar.gz";
+  
+  //now download 
+    res.download(file_path, function(err){
+      //unmount and delete
+      var umount = spawnSync('umount', [local_dir_name]);
+    });
+  
+  
+})
+
+app.get('/delete', (req, res) => {
+  if(!login(req)){    
+    res.redirect("/");
+    return;   
+  }
+  //check validity of user
+  var usr_recv=req.query.job_id.split("-")[0];
+  if(usr_recv!=req.session.user){
+    res.redirect("/dashboard");
+    return;
+  }
+  //set etcd delete signal
+  etcd.set("/users"+"/"+usr_recv+"/"+req.query.job_id+"/delete_signal",delete_signal_codes.delete);
+  res.redirect("/dashboard");
+}) 
+
 
 app.post('/login', (req, res) => {
   if(login(req)){
@@ -303,6 +377,7 @@ app.get('/dashboard', (req, res) => {
     res.send(`
     <html>
     <body>
+    <a href="/logout">logout</a><br>
     Jobs<br>
     </br>
     <a href="/uploads_page">Upload a new job</a>
@@ -352,6 +427,16 @@ function login(req){// IMPORTANT implement your own proper Login here
   return false;
 }
 
+function logout(req){// IMPORTANT implement your own proper Login here
+  delete req.session.user;
+  return;
+}
+
+app.get('/logout', (req, res) => {
+  logout(req);
+  res.redirect('/');
+})
+
 
 app.get('/uploads_page', (req, res) => {
   
@@ -360,7 +445,7 @@ app.get('/uploads_page', (req, res) => {
     <html>
     <body>
     <a href="/dashboard">dashboard</a><br>
-    Login<br>
+    <a href="/logout">logout</a><br>
     </br>
     <form action="/upload_job" method="post" enctype="multipart/form-data">
     <input type="file" name="docker_image">
@@ -444,7 +529,6 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
            <body>
            Upload succeeded, file is being read by server. Redirecting...
            </body>
-           
            <script>
            setTimeout(function () {
                     window.location ="/dashboard"

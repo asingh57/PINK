@@ -22,6 +22,11 @@ server_unavailable=1
 uploaded_to_web_server=0
 uploaded_to_processing_server=1
 
+#delete_signal codes:
+dont_delete=0
+delete=1
+
+
 
 #stop signals
 stop_server_process_uploads=0#mark the server down, accept, no new uploads but keep processing all jobs that are already on there (including unprocessed uploads) # STRONGLY RECOMMENDED
@@ -82,8 +87,9 @@ while(True):
                 out.wait()
                 (stdout, stderr) = out.communicate()
                 if(out.returncode==0):
-                  client.write('/users/'+user+'/'+image_name+'/status',uploaded_to_processing_server)
+                  client.write('/users/'+user+'/'+image_name+'/delete_signal',dont_delete)
                   client.write('/users/'+user+'/'+image_name+'/processing_machine_address',i.split('/')[-1])
+                  client.write('/users/'+user+'/'+image_name+'/status',uploaded_to_processing_server)
                   os.system("rm "+uploads_src_directory+"/"+image_name)
                   print("upload to processing server successful for "+'/users/'+user+'/'+image_name)
                   break
