@@ -251,7 +251,6 @@ app.get('/download', (req, res) => {
   }
   //check validity of user
   var usr_recv=req.query.job_id.split("-")[0];
-  console.log(etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status"));
   if(usr_recv!=req.session.user || etcd.getSync("/users/"+usr_recv+"/"+req.query.job_id+"/status").body.node.value!=job_status_codes.process_completed){
     res.redirect("/dashboard");
     return;
@@ -265,7 +264,7 @@ app.get('/download', (req, res) => {
   
   var mount_remote_fs = spawnSync(
   'sshfs', 
-  [
+  [ 
   '-o', 
   'StrictHostKeychecking=no',
   'root@'+server_name+":"+processing_server_download_folder,
@@ -278,7 +277,13 @@ app.get('/download', (req, res) => {
   //now download 
     res.download(file_path, function(err){
       //unmount and delete
+      console.log(err);
       var umount = spawnSync('umount', [local_dir_name]);
+      var rm = spawnSync('rm', [local_dir_name]);
+      if(err){
+        res.redirect("/dashboard");
+      }
+      
     });
   
   
@@ -523,7 +528,6 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
     var status_value={status:job_status_codes.uploaded_to_web_server, 
     web_server_address:httpsServer.address().address,
     entrypoint:req.body.container_entrypoint};
-    console.log(req.body);
     update_key("/users/"+req.session.user+"/"+filename,status_value,
       function(err){
         if(!err){
