@@ -18,8 +18,8 @@ The following configuration is recommended for this project, although some of th
 
 ## How it works:
 A task is uploaded by the user on the web app or CLI. Here "task" means a docker image
-The task is handled by the web server and allocated to one of the processing servers
-The processing server processes the task as a container and returns the docker container's file system as a downloadable output to the user
+The task is handled by the web server's background daemon and allocated to one of the processing servers
+The processing server processes the task as a container and returns the docker container's home directory as a downloadable output to the user
 
 ###On the back end:
 The router allocates work to individual web servers via nginx

@@ -418,7 +418,7 @@ app.get('/get_user_active_jobs', (req, res) => {
 });
 
 function login(req){// IMPORTANT implement your own proper Login here
-  if(req.session.user || (req.body.user && req.body.password && req.body.password=="abc" && req.body.password=="abc")){
+  if(req.session.user || (req.body.user && req.body.password && req.body.password=="ojk*9j98(&*BH8abc")){
     if(!req.session.user){
       req.session.user=req.body.user;
     }
@@ -454,7 +454,6 @@ app.get('/uploads_page', (req, res) => {
     </br>
     <form action="/upload_job" method="post" enctype="multipart/form-data">
     Upload file:<input type="file" name="docker_image">
-    Entrypoint command:<input type="text" name="container_entrypoint"></input>
     <button type="submit">Upload</button >
     </button>
     </body>
@@ -526,8 +525,8 @@ app.post('/upload_job', upload.single('docker_image'), (req, res) => {
     //multer handle
     var filename=req.file.filename;
     var status_value={status:job_status_codes.uploaded_to_web_server, 
-    web_server_address:httpsServer.address().address,
-    entrypoint:req.body.container_entrypoint};
+    web_server_address:httpsServer.address().address
+    };
     update_key("/users/"+req.session.user+"/"+filename,status_value,
       function(err){
         if(!err){

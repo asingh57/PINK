@@ -175,7 +175,6 @@ def run_uploads(running_dockers):
       continue
     global current_run_spots_available
     
-    command=etcd_loop_till_read('/users/'+user+'/'+image_name+'/entrypoint').value.encode('ascii','ignore')
     if current_run_spots_available>0:
       arr=["docker", "load","-i"
           ,uploads_directory+"/"+image_name

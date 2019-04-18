@@ -43,6 +43,8 @@ stop() {
   else
       printf  "${RED}Program is not running$END"
   fi
+  sleep 5
+  killall -9 processing_daemon.py
 }
 
 
