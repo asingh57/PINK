@@ -1,19 +1,19 @@
 # PINK
-PINK is not Kubernetes
+PINK is not Kubernetes is an orchestrated cloud developed to provide McGill University's Computer Taskforce.
  
 A simple, fault tolerant cloud orchestration tool that allows GUI/CLI based access to a cluster of CUDA powered servers. Users can simply upload their docker images and have allocated servers load-balance and process them. 
 
-**Note:**  Note that is has only been tested with Ubuntu 18.04.2LTS
+**Note:**  It has only been tested with Ubuntu 18.04.2LTS
 
 The following configuration is recommended for this project, although some of the functions can be aggregated together:
 
 
 1) One administrator machine with Ansible 2.8 installed. "Control server"
 2) At least one machine with apt package manager "Web server(s)", 
-    control server has ssh access to these machines
+    The control server should have ssh access to it with permission to install packages and services.
 3) At least one server with apt package manager and a Nvidia CUDA capable GPU "Processing server(s)" 
-    control server has ssh access to these machines.
-4) A linux server with apt. control server has ssh access to this. "load balancer"
+    The control server should have ssh access to it with permission to install packages and services.
+4) A linux server with apt. The control server should have ssh access to it with permission to install packages. "load balancer"
 
 
 ## How it works:
@@ -21,7 +21,7 @@ A task is uploaded by the user on the web app or CLI. Here "task" means a docker
 The task is handled by the web server's background daemon and allocated to one of the processing servers
 The processing server processes the task as a container and returns the docker container's home directory as a downloadable output to the user
 
-###On the back end:
+### On the back end:
 The router allocates work to individual web servers via nginx
 An etcd key store cluster is formed using all machines on the network
 The web servers store active transaction details in etcd
@@ -51,7 +51,7 @@ Make sure you implement login according to your organisations specification befo
 ## Step 2)
 install ansible. This repo uses Ansible 2.8 modules which are not available in default apt packages so use the following instead to manually install via the Ansible git repo
 
-[Ansible 2.8 installation guide found here](https://awsbloglink.wordpress.com/2018/10/05/how-to-install-ansible-on-ubuntu-18-04-lts/)
+[Ansible 2.8 installation guide can be found here](https://awsbloglink.wordpress.com/2018/10/05/how-to-install-ansible-on-ubuntu-18-04-lts/)
 
 ## Step 3)
 deploy the ansible playbooks using
@@ -62,7 +62,7 @@ ansible-playbook site.yml -i servers
 Now the app should be accessible on port 443 of your nginx server. The nginx server will forward your http requests to the web servers.
 
 The following happens upon deployment:
-One by one ansible ssh'es into each of the machines specified in servers file
+One by one ansible SSH's into each of the machines specified in servers file
 
 etcd is installed on etcd machines 
 nvidia docker2 and nvidia drivers are installed on the gpu servers
